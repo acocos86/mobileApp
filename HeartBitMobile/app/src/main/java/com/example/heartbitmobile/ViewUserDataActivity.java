@@ -11,19 +11,34 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import com.android.volley.RequestQueue;
+import com.android.volley.toolbox.Volley;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+
+import okhttp3.OkHttpClient;
+import okhttp3.ResponseBody;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory;
+import retrofit2.converter.gson.GsonConverterFactory;
 
 public class ViewUserDataActivity extends AppCompatActivity {
 
 
-    TextView myLabel;
-    EditText myTextbox;
+    TextView bluetooth;
     TextView pulseVal;
     TextView ecgVal;
 
@@ -38,23 +53,25 @@ public class ViewUserDataActivity extends AppCompatActivity {
     byte[] readBuffer;
     int readBufferPosition;
     int counter;
+    String userName;
+    Number userId;
+    Number doctorId;
+    Number patientId;
+
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_view_user_data);
 
-
         // variables
 
-        myLabel = (TextView)findViewById(R.id.label);
+        bluetooth = (TextView)findViewById(R.id.label);
         pulseVal = (TextView)findViewById(R.id.pulse);
         ecgVal = (TextView)findViewById(R.id.ecg);
-        myTextbox = (EditText)findViewById(R.id.entry);
         Button recData = (Button)findViewById(R.id.recordingButton);
         Button stopRec = (Button)findViewById(R.id.stopRecordingButton);
-
-
 
         recData.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v)
@@ -83,11 +100,42 @@ public class ViewUserDataActivity extends AppCompatActivity {
 
         // Get the Intent that started this activity and extract the string
         Intent intent = getIntent();
-        String message = intent.getStringExtra(MainActivity.EXTRA_MESSAGE);
+        String usernameGlobal = intent.getStringExtra(MainActivity.USERID);
 
-        // Capture the layout's TextView and set the string as its text
-        TextView username = findViewById(R.id.username);
-        username.setText(message);
+        OkHttpClient okHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient();
+
+        Retrofit retrofit = new Retrofit.Builder().client(okHttpClient)
+                .baseUrl("https://heartbitfis.azurewebsites.net")
+                .addConverterFactory(GsonConverterFactory.create())
+                .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+                .build();
+
+        PacientService pacientService = retrofit.create(PacientService.class);
+        Call<List<Pacient>> value = pacientService.getPacient(Long.parseLong(usernameGlobal));
+        value.enqueue(new Callback<List<Pacient>>() {
+            @Override
+            public void onResponse(Call<List<Pacient>> call, Response<List<Pacient>> response) {
+                userName = response.body().get(0).name;
+                userId = response.body().get(0).id;
+                doctorId = response.body().get(0).doctorId;
+                patientId = response.body().get(0).patientId;
+                // Capture the layout's TextView and set the string as its text
+                TextView username = findViewById(R.id.username);
+                username.setText(userName);
+            }
+
+            @Override
+            public void onFailure(Call<List<Pacient>> call, Throwable t) {
+                System.out.println(" stop ");
+            }
+        });
+
+
+
+
+
+
+
     }
 
     void findBT()
@@ -95,7 +143,7 @@ public class ViewUserDataActivity extends AppCompatActivity {
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if(mBluetoothAdapter == null)
         {
-            myLabel.setText("No bluetooth adapter available");
+            bluetooth.setText("No bluetooth adapter available");
         }
 
         if(!mBluetoothAdapter.isEnabled())
@@ -116,7 +164,7 @@ public class ViewUserDataActivity extends AppCompatActivity {
                 }
             }
         }
-        myLabel.setText("Bluetooth Device Found");
+        bluetooth.setText("Bluetooth Device Found");
     }
 
     void openBT() throws IOException
@@ -124,7 +172,6 @@ public class ViewUserDataActivity extends AppCompatActivity {
         UUID uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); //Standard SerialPortService ID
         //mmSocket = mmDevice.createRfcommSocketToServiceRecord(uuid);
         mmSocket = createBluetoothSocket(mmDevice);
-//        mmSocket.connect();
 
         mmSocket.connect();
 
@@ -134,7 +181,7 @@ public class ViewUserDataActivity extends AppCompatActivity {
 
         beginListenForData();
 
-        myLabel.setText("Bluetooth Opened");
+        bluetooth.setText("Bluetooth Opened");
 
 
     }
@@ -144,7 +191,7 @@ public class ViewUserDataActivity extends AppCompatActivity {
         mmOutputStream.close();
         mmInputStream.close();
         mmSocket.close();
-        myLabel.setText("Bluetooth Closed");
+        bluetooth.setText("Bluetooth Closed");
     }
 
     private BluetoothSocket createBluetoothSocket(BluetoothDevice device) throws IOException {
@@ -160,7 +207,38 @@ public class ViewUserDataActivity extends AppCompatActivity {
 
         return  device.createRfcommSocketToServiceRecord(MY_UUID);
     }
+    void sendRecData(int level, String parId) {
+        OkHttpClient okHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient();
 
+        Retrofit retrofit = new Retrofit.Builder().client(okHttpClient)
+                .baseUrl("https://heartbitfis.azurewebsites.net")
+                .addConverterFactory(GsonConverterFactory.create())
+                .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+                .build();
+        Intent intent = getIntent();
+        String userId = intent.getStringExtra(MainActivity.USERID);
+
+        RecData recData = new RecData();
+        recData.patientId = patientId.toString();
+        recData.date = Calendar.getInstance().getTime();
+        recData.parameterId = parId;  // 1 = Puls, 2 = ECG
+        recData.level = level;
+        RecDataSevice recDataService = retrofit.create(RecDataSevice.class);
+        Call<ResponseBody> value = recDataService.updateRecData(recData);
+            value.enqueue(new Callback<ResponseBody>() {
+                @Override
+                public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
+
+                }
+
+                @Override
+                public void onFailure(Call<ResponseBody> call, Throwable t) {
+
+                }
+            });
+
+
+    }
     void beginListenForData()
     {
         final Handler handler = new Handler();
@@ -196,10 +274,21 @@ public class ViewUserDataActivity extends AppCompatActivity {
                                     {
                                         public void run()
                                         {
-                                            String [] formatData = data.split(",", 2);
-                                            pulseVal.setText(formatData[0]);
-                                            ecgVal.setText(formatData[1]);
+                                            RecData recData = new RecData();
+                                            String [] formatData = data.split(";");
+                                            float pulse = Float.parseFloat(formatData[1]);
+                                            int pulseInt = (int) pulse;
+                                            int ecgInt = Integer.parseInt(formatData[0]);
+                                            pulseVal.setText(formatData[1]);
+                                            ecgVal.setText(formatData[0]);
 
+
+                                            sendRecData(pulseInt, "1");
+                                            sendRecData(ecgInt, "2");
+                                            //pulseVal.setText(data);
+                                            //recData.setPulse(formatData[1]);
+                                            //recData.setEcg(formatData[2]);
+                                            //sendDataHttp(recData);
                                         }
                                     });
                                 }
@@ -220,6 +309,9 @@ public class ViewUserDataActivity extends AppCompatActivity {
 
         workerThread.start();
     }
+
+
+
 
 
 }
